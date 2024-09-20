@@ -1,0 +1,401 @@
+---
+title: "FSA_CDL_Crosswalk"
+author: "Kaitlyn Spangler"
+date: "2024-03-20"
+output: html_document
+---
+
+This exploration will visualize the condensing of FSA crop categories into the CDL categories used in USDA's CDL CropScape dataset - which is a 30m resolution raster dataset classifying all agricultural land use in the coterminous US.
+
+## Load Data
+
+```{r}
+options("install.lock"=FALSE)
+#install.packages("fauxnaif", dependencies = T)
+library(fauxnaif)
+library(svglite)
+library(tidyverse)
+
+ap_cso <- read.csv("./data/FSA-to-CDL_Crosswalk_1.csv", na.strings=c("","NA","Blank", "blank"))
+ap_cso <- ap_cso[-c(1695:1737), ]
+# ensure all NAs match 
+
+
+coarse <- read.csv("./data/FSA-to-CDL_Crosswalk_2.csv", na.strings=c("","NA","Blank", "blank", "Turn Acres"))
+coarse <- coarse[-c(1695:1737), ]
+#make "Turn Acres" NA in CDL_Crop_Name - TO DO
+  
+```
+
+## Summarize FSA data
+
+```{r}
+library(ggalluvial)
+library(ggplot2)
+
+#Annual and Perennials
+
+sum <- ap_cso %>% group_by(Annual_Perennial) %>% mutate(AP_n = n()) 
+list <- c(149, 738, 807)
+names <- c("NA", "Perennial", "Annual")
+
+ap <- data.frame(list, names)
+
+ap_plot <- ggplot(ap, aes(x = reorder(names, -list), y = list, fill = names)) +
+  geom_bar(stat = "identity") +
+  xlab("Type of FSA Crop") +
+  ylab("Count")+
+  theme_minimal()+
+  theme(legend.position = "none")
+
+# Commodity, specialty, other 
+sum2 <- ap_cso %>% group_by(Commodity_Specialty_Other) %>% mutate(CSO_n = n()) 
+list2 <- c(84, 1142, 387)
+names2 <- c("Commodity", "Specialty", "Other")
+
+ap2 <- data.frame(list2, names2)
+
+ap_plot2 <- ggplot(ap2, aes(x = reorder(names2, -list2), y = list2, fill = names2)) +
+  geom_bar(stat = "identity") +
+  xlab("Type of FSA Crop") +
+  ylab("Count")+
+  theme_minimal()+
+  theme(legend.position = "none")
+
+ap_plot2
+```
+
+```{r}
+# Make data ready for sankey 
+coarse2 <- coarse %>% 
+  group_by(CDL_Code) %>% 
+  mutate(CDL_n = n()) %>% 
+  group_by(FSA_Crop_Abbr) %>% 
+  mutate(FSA_n = n()) %>% 
+  group_by(FSA_Type_Name) %>%
+  mutate(FSAType_n = n())
+
+coarse2$CDL_Crop_Name[is.na(coarse2$CDL_Crop_Name)] <- "No Category"
+
+class(coarse2$CDL_Code)
+
+ coarse3 <- coarse2 %>% 
+  filter(!CDL_Crop_Name %in% c("No Category", "Grapes", "Aquaculture", "Other Crops", "Herbs", "Misc. Vegs & Fruit")) %>%
+  filter(!CDL_Code %in% c(60,237,254,241,230,233,231,232,226,235,234,239,240,228,225,238,236,26)) 
+  #Talk to Andrea about removing other crops 
+
+
+coarse3$FSA_Crop_Name <- factor(coarse3$FSA_Crop_Name, levels=unique(coarse3$FSA_Crop_Name))
+
+
+sankey <- ggplot(coarse3, 
+  aes(y = FSA_n, axis1 = reorder(FSA_Crop_Name, -FSA_n), axis2 = CDL_Crop_Name)) +
+  geom_alluvium(aes(fill = CDL_Crop_Name), curve_type = "quintic")+
+  geom_stratum(aes(fill = CDL_Crop_Name, color = "grey"), width = 1/8) + 
+  geom_label(stat = "stratum", aes(label = after_stat(stratum))) +
+  theme_void()+
+  theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank())+
+  ggtitle("FSA to CDL Coarsening")
+
+#sankey <- sankey + 
+  #ggrepel::geom_text_repel(aes(label = after_stat(stratum)),
+        #stat = "stratum", size = 6, 
+        #direction = "y", nudge_x = -.3)
+#move labels with ggrepeltext: https://corybrunson.github.io/ggalluvial/articles/labels.html
+
+
+sankey
+```
+
+```{r}
+ggsave("./figs/sankey_all.png", width = 16, height = 25, units = "in")
+
+
+svglite("./figs/sankey_all.svg", width = 8, height = 15)
+sankey
+dev.off()
+```
+
+## Let's try to filter based on number of FSA crop types to see better
+
+```{r}
+coarse_few <- coarse3 %>% filter(FSA_n < 20)
+coarse_big <- coarse3 %>% filter(FSA_n > 20)
+
+sankey_few <- ggplot(coarse_few, 
+  aes(y = FSA_n, axis1 = reorder(FSA_Crop_Name, -FSA_n), axis2 = CDL_Crop_Name)) +
+  geom_alluvium(aes(fill = CDL_Crop_Name), curve_type = "quintic")+
+  geom_stratum(aes(fill = CDL_Crop_Name, color = "grey"), width = 1/8) + 
+  geom_label(stat = "stratum", aes(label = after_stat(stratum))) +
+  theme_void()+
+  theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank())+
+  ggtitle("FSA to CDL Coarsening")
+
+#sankey <- sankey + 
+  #ggrepel::geom_text_repel(aes(label = after_stat(stratum)),
+        #stat = "stratum", size = 6, 
+        #direction = "y", nudge_x = -.3)
+#move labels with ggrepeltext: https://corybrunson.github.io/ggalluvial/articles/labels.html
+
+
+sankey_few
+ggsave("./figs/sankey_few.png", width = 16, height = 25, units = "in")
+svglite("./figs/sankey_few.svg", width = 8, height = 15)
+sankey_few
+dev.off()
+
+
+sankey_big <- ggplot(coarse_big, 
+  aes(y = FSA_n, axis1 = reorder(FSA_Crop_Name, -FSA_n), axis2 = CDL_Crop_Name)) +
+  geom_alluvium(aes(fill = CDL_Crop_Name), curve_type = "quintic")+
+  geom_stratum(aes(fill = CDL_Crop_Name, color = "grey"), width = 1/8) + 
+  geom_label(stat = "stratum", aes(label = after_stat(stratum))) +
+  theme_void()+
+  theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank())+
+  ggtitle("FSA to CDL Coarsening")
+
+#sankey <- sankey + 
+  #ggrepel::geom_text_repel(aes(label = after_stat(stratum)),
+        #stat = "stratum", size = 6, 
+        #direction = "y", nudge_x = -.3)
+#move labels with ggrepeltext: https://corybrunson.github.io/ggalluvial/articles/labels.html
+
+
+sankey_big
+
+ggsave("./figs/sankey_big.png", width = 16, height = 25, units = "in")
+svglite("./figs/sankey_big.svg", width = 8, height = 15)
+sankey_few
+dev.off()
+```
+
+## Corn
+
+```{r}
+corn <- coarse2 %>% 
+  filter(FSA_Crop_Abbr == "CORN")
+
+corn_sankey <- ggplot(corn,
+       aes(y = FSA_n, axis1 = FSA_Type_Name, axis2 = FSA_Crop_Name, axis3 = CDL_Crop_Name)) +
+  scale_x_discrete(limits = c("FSA Type", "FSA Crop", "CDL Crop"), expand = c(.2, .05)) +
+  geom_alluvium(aes(fill = CDL_Crop_Name), curve_type = "quintic")+
+  geom_stratum()+ 
+  geom_text(stat = "stratum", aes(label = after_stat(stratum), size = 6)) +
+  theme_minimal()+
+  theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        #axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank())+
+  #scale_fill_viridis_d() +
+  ggtitle("FSA to CDL Coarsening - Corn")
+
+corn_sankey
+ggsave("./figs/sankeycorn.png", width = 13, height = 15, units = "in")
+
+svglite("./figs/sankeycorn_svg.svg", width = 13, height = 15)
+corn_sankey
+dev.off()
+```
+
+## Herbs
+
+```{r}
+library(ggrepel)
+herbs <- coarse2 %>% 
+  filter(CDL_Code == 57)
+
+herb_sankey <- ggplot(herbs,
+       aes(y = FSA_n, axis1 = FSA_Crop_Name, axis2 = FSA_Type_Name, axis3 = CDL_Crop_Name)) +
+  scale_x_discrete(limits = c("FSA Crop", "FSA Type", "CDL Crop"), expand = c(.2, .05)) +
+  geom_alluvium(aes(fill = FSA_Type_Name), color="black", curve_type = "quintic", width = 1/20)+
+  geom_stratum()+ 
+  theme_minimal()+
+  theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        #axis.text.x=element_blank() - change size!
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank())+
+  ggtitle("FSA to CDL Coarsening - Herbs")
+
+herb_sankey <- herb_sankey + 
+  ggrepel::geom_text_repel(aes(label = after_stat(stratum)),
+        stat = "stratum", size = 6, 
+        direction = "y", nudge_x = -.3)
+
+herb_sankey
+ggsave("./figs/sankeyherb.png", width = 13, height = 15, units = "in")
+```
+
+## Misc. Fruits and Veg
+
+```{r}
+fv_misc <- coarse2 %>% 
+  filter(CDL_Code == 47)
+
+miscfv_sankey <- ggplot(fv_misc,
+       aes(y = FSA_n, axis1 = FSA_Crop_Name, axis2 = CDL_Crop_Name)) +
+  scale_x_discrete(limits = c("FSA Crop", "CDL Crop"), expand = c(.2, .05)) +
+  geom_alluvium(aes(fill = FSA_Crop_Name),aes.bind=TRUE, color="black", curve_type = "quintic", width = 1/10)+
+  geom_stratum()+ 
+  #geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
+  theme_minimal()+
+  theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        #axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank())+
+  ggtitle("FSA to CDL Coarsening - Misc. Vegs & Fruit")
+
+
+miscfv_sankey <- miscfv_sankey + 
+  ggrepel::geom_text_repel(aes(label = after_stat(stratum)),
+        stat = "stratum", size = 4, 
+        direction = "y", nudge_x = -.3)
+
+miscfv_sankey
+
+ggsave("./figs/sankeyfvmisc.png", width = 15, height = 12, units = "in")
+```
+
+## Greens
+
+```{r}
+greens <- coarse2 %>% 
+  filter(CDL_Code == 219)
+
+greens_sankey <- ggplot(greens,
+       aes(y = FSA_n, axis1 = FSA_Type_Name, axis2 = FSA_Crop_Name, axis3 = CDL_Crop_Name)) +
+  scale_x_discrete(limits = c("FSA Type", "FSA Crop", "CDL Crop"), expand = c(.2, .05)) +
+  geom_alluvium(aes(fill = FSA_Type_Name), aes.bind=TRUE, color="black", curve_type = "arctangent", width = 1/20)+
+  geom_stratum()+ 
+  theme_minimal()+
+  theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        #axis.text.x=element_blank() - change size!
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank())+
+  ggtitle("FSA to CDL Coarsening - Greens")
+
+greens_sankey <- greens_sankey + 
+  ggrepel::geom_text_repel(aes(label = after_stat(stratum)),
+        stat = "stratum", size = 6, 
+        direction = "y", nudge_x = -.3)
+
+greens_sankey
+ggsave("./figs/sankeygreens.png", width = 13, height = 15, units = "in")
+
+
+svglite("./figs/sankeygreens_svg.svg", width = 13, height = 15)
+greens_sankey
+dev.off()
+```
+
+## Other Crops
+
+```{r}
+other_crops <- coarse2 %>% 
+  filter(CDL_Code == 44) %>% filter(!FSA_Crop_Code == 7501)
+
+othercrops_sankey <- ggplot(other_crops,
+       aes(y = FSA_n, axis1 = reorder(FSA_Crop_Name, -FSA_n), axis2 = CDL_Crop_Name)) +
+  scale_x_discrete(limits = c("FSA_Crop", "CDL Crop"), expand = c(.2, .05)) +
+  geom_alluvium(aes(fill = FSA_Crop_Name), color="black", curve_type = "arctangent", width = 1/20)+
+  geom_stratum()+ 
+  theme_minimal()+
+  theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        #axis.text.x=element_blank() - change size!
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank())+
+  ggtitle("FSA to CDL Coarsening - Other Crops")
+
+othercrops_sankey <- othercrops_sankey + 
+  ggrepel::geom_text_repel(aes(label = after_stat(stratum)),
+        stat = "stratum", size = 6, 
+        direction = "y", nudge_x = -.3)
+
+othercrops_sankey
+ggsave("./figs/othercrops_sankey.png", width = 13, height = 21, units = "in")
+
+svglite("./figs/sankeyothercrops_svg.svg", width = 13, height = 21)
+othercrops_sankey
+dev.off()
+
+#Flowers
+flowers <- coarse2 %>% 
+  filter(CDL_Code == 44) %>% filter(FSA_Crop_Code == 7501)
+
+flowers_sankey <- ggplot(flowers,
+       aes(y = FSA_n, axis1 = FSA_Type_Name, axis2=FSA_Crop_Name, axis3 = CDL_Crop_Name)) +
+  scale_x_discrete(limits = c("FSA Type", "FSA Crop", "CDL Crop"), expand = c(.2, .05)) +
+  geom_alluvium(aes(fill = FSA_Type_Name), color="black", curve_type = "arctangent", width = 1/20)+
+  geom_stratum()+ 
+  theme_minimal()+
+  theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        #axis.text.x=element_blank() - change size!
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank())+
+  ggtitle("FSA to CDL Coarsening - Other Crops")
+
+flowers_sankey <- flowers_sankey + 
+  ggrepel::geom_text_repel(aes(label = after_stat(stratum)),
+        stat = "stratum", size = 6, 
+        direction = "y", nudge_x = -.3)
+
+flowers_sankey
+ggsave("./figs/flowers_sankey.png", width = 13, height = 15, units = "in")
+
+
+svglite("./figs/sankeyflowers_svg.svg", width = 13, height = 15)
+flowers_sankey
+dev.off()
+
+##COME BACK TO
+```
+
+## Other tree crops
+
+```{r}
+other_tree <- coarse2 %>% 
+  filter(CDL_Code == 71)
+
+othertree_sankey <- ggplot(other_tree,
+       aes(y = FSA_n, axis1 = FSA_Crop_Name, axis2 = CDL_Crop_Name)) +
+  scale_x_discrete(limits = c("FSA Crop", "CDL Crop"), expand = c(.2, .05)) +
+  geom_alluvium(aes(fill = FSA_Crop_Name), color="black", curve_type = "quintic", width = 1/20)+
+  geom_stratum()+ 
+  theme_minimal()+
+  theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        #axis.text.x=element_blank() - change size!
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank())+
+  ggtitle("FSA to CDL Coarsening - Other Tree Crops")
+
+othertree_sankey <- othertree_sankey + 
+  ggrepel::geom_text_repel(aes(label = after_stat(stratum)),
+        stat = "stratum", size = 6, 
+        direction = "y", nudge_x = -.3)
+
+othertree_sankey
+ggsave("./figs/othertree_sankey.png", width = 13, height = 20, units = "in")
+
+
+svglite("./figs/sankeyothertree_svg.svg", width = 13, height = 20)
+othertree_sankey
+dev.off()
+```
